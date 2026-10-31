@@ -8,6 +8,24 @@ import NIOPosix
 import NIOCore
 
 final class AsyncPostgresConnectionTests: XCTestCase {
+    func testQueryAfterClientCloseFailsWithoutHanging() async throws {
+        let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { XCTAssertNoThrow(try eventLoopGroup.syncShutdownGracefully()) }
+        try await withTestConnection(on: eventLoopGroup.next()) { connection in
+            try await connection.close()
+            let started = Date()
+            do {
+                _ = try await connection.query("SELECT 1", logger: .psqlTest)
+                XCTFail("Expected closed connection failure")
+            } catch let error as PSQLError {
+                XCTAssertEqual(error.code, .clientClosedConnection)
+            } catch {
+                XCTFail("Expected a PostgreSQL connection error")
+            }
+            XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+        }
+    }
+
     func test1kRoundTrips() async throws {
         let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer { XCTAssertNoThrow(try eventLoopGroup.syncShutdownGracefully()) }

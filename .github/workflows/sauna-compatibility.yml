@@ -1,0 +1,25 @@
+name: Sauna compatibility
+on:
+  pull_request:
+    branches: [sauna-1.33.2]
+  push:
+    branches: ['codex/**', sauna-1.33.2]
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: Swift 6.4.2 embedded unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    container:
+      image: swift:6.4.2-noble@sha256:bca121f6eb59fd80340d1296887b2698ed8f3eb9eca7d80c181f8af769dc7ee0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build with the committed dependency lock
+        run: swift build --build-tests --force-resolved-versions --jobs 2
+      - name: Run embedded unit tests (no PostgreSQL integration)
+        run: swift test --skip-build --filter '^(PostgresNIOTests|ConnectionPoolModuleTests)'
