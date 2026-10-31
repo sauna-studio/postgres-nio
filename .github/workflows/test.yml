@@ -10,6 +10,7 @@ on:
 
 jobs:
   linux-unit:
+    if: github.repository == 'vapor/postgres-nio'
     permissions:
       contents: read
     strategy:
@@ -36,6 +37,7 @@ jobs:
           codecov_token: ${{ secrets.CODECOV_TOKEN }}
 
   linux-integration-and-dependencies:
+    if: github.repository == 'vapor/postgres-nio'
     permissions:
       contents: read
     strategy:
@@ -94,6 +96,7 @@ jobs:
         run: swift test --package-path fluent-postgres-driver
 
   macos-all:
+    if: github.repository == 'vapor/postgres-nio'
     permissions:
       contents: read
     strategy:
@@ -143,6 +146,7 @@ jobs:
           codecov_token: ${{ secrets.CODECOV_TOKEN }}
           
   api-breakage:
+    if: github.repository == 'vapor/postgres-nio'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -170,6 +174,7 @@ jobs:
           key: api-breakage-${{ github.sha }}
 
   musl:
+    if: github.repository == 'vapor/postgres-nio'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -198,6 +203,6 @@ jobs:
   submit-dependencies:
     permissions:
       contents: write
-    if: github.event_name == 'push'
+    if: github.repository == 'vapor/postgres-nio' && github.event_name == 'push'
     uses: vapor/ci/.github/workflows/submit-deps.yml@main
     secrets: inherit
