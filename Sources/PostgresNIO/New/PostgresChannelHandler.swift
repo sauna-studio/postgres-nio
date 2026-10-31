@@ -258,6 +258,9 @@ final class PostgresChannelHandler: ChannelDuplexHandler {
         case .closeCommand(let command):
             psqlTask = .closeCommand(command)
         case .extendedQuery(let query):
+            // A write promise acknowledges acceptance of the task, not query
+            // completion (which has its own promise in the query context).
+            promise?.succeed(())
             psqlTask = .extendedQuery(query)
 
         case .startListening(let listener):
