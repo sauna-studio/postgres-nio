@@ -1,3 +1,4 @@
+import Atomics
 import NIOCore
 import NIOPosix
 import NIOEmbedded
@@ -9,6 +10,56 @@ import Synchronization
 @Suite struct PostgresConnectionTests {
 
     let logger = Logger(label: "PostgresConnectionTests")
+
+    @Test(.timeLimit(.minutes(1)))
+    func testAsyncQueryOnClosedConnectionFailsInsteadOfHanging() async throws {
+        try await self.withAsyncTestingChannel { connection, channel in
+            do { try await connection.close() }
+            catch {
+                Issue.record("Could not close the test connection")
+                return
+            }
+            #expect(!channel.isActive)
+            do {
+                _ = try await connection.query("SELECT 1", logger: self.logger)
+                Issue.record("Expected closed connection failure")
+            } catch let error as PSQLError {
+                #expect(error.code == .clientClosedConnection)
+                #expect(error.underlying as? ChannelError == .ioOnClosedChannel)
+            } catch {
+                Issue.record("Expected a PostgreSQL connection error")
+            }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func testAcceptedQueryCompletesWritePromiseBeforeQueryResponse() async throws {
+        try await self.withAsyncTestingChannel { connection, channel in
+            let queryPromise = channel.eventLoop.makePromise(of: PSQLRowStream.self)
+            let writePromise = channel.eventLoop.makePromise(of: Void.self)
+            let completed = ManagedAtomic(false)
+            queryPromise.futureResult.whenComplete { _ in completed.store(true, ordering: .relaxed) }
+            let context = ExtendedQueryContext(query: "SELECT 1", logger: self.logger, promise: queryPromise)
+            channel.write(HandlerTask.extendedQuery(context), promise: writePromise)
+            do {
+                try await writePromise.futureResult.get()
+                let queryIsPending = !completed.load(ordering: .relaxed)
+                #expect(queryIsPending)
+                _ = try await channel.waitForUnpreparedRequest()
+                try await channel.writeInbound(PostgresBackendMessage.parseComplete)
+                try await channel.writeInbound(PostgresBackendMessage.parameterDescription(.init(dataTypes: [])))
+                try await channel.writeInbound(PostgresBackendMessage.noData)
+                try await channel.writeInbound(PostgresBackendMessage.bindComplete)
+                try await channel.writeInbound(PostgresBackendMessage.commandComplete("SELECT 0"))
+                try await channel.writeInbound(PostgresBackendMessage.readyForQuery(.idle))
+                let stream = try await queryPromise.futureResult.get()
+                let rows = try await stream.all().get()
+                #expect(rows.isEmpty)
+            } catch {
+                Issue.record("Accepted query did not finish its independent promises")
+            }
+        }
+    }
 
     @Test func testConnectionFailure() {
         // We start a local server and close it immediately to ensure that the port
