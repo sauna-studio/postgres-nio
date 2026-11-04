@@ -263,6 +263,48 @@ import Synchronization
         }
     }
 
+    @Test(.timeLimit(.minutes(1)))
+    func testCachedPreparedExecutionReceiptKeepsItsResultPending() async throws {
+        try await self.withAsyncTestingChannel { _, channel in
+            do {
+                func task(_ result: EventLoopPromise<PSQLRowStream>) -> HandlerTask {
+                    .executePreparedStatement(.init(name: "cached-receipt", sql: "SELECT 1 WHERE false", bindings: .init(),
+                        bindingDataTypes: [], logger: self.logger, promise: result))
+                }
+                let first = channel.eventLoop.makePromise(of: PSQLRowStream.self)
+                let firstReceipt = channel.eventLoop.makePromise(of: Void.self)
+                channel.write(task(first), promise: firstReceipt)
+                try await firstReceipt.futureResult.get()
+                _ = try await channel.waitForPrepareRequest()
+                try await channel.sendPrepareResponse(parameterDescription: .init(dataTypes: []), rowDescription: .init(columns: [
+                    .init(name: "value", tableOID: 0, columnAttributeNumber: 0, dataType: .int4,
+                        dataTypeSize: 4, dataTypeModifier: -1, format: .binary)
+                ]))
+                _ = try await channel.waitForPreparedRequest()
+                try await channel.sendPreparedResponse(dataRows: [], commandTag: "SELECT 0")
+                let firstStream = try await first.futureResult.get()
+                let firstRows = try await firstStream.all().get()
+                #expect(firstRows.isEmpty)
+
+                let cached = channel.eventLoop.makePromise(of: PSQLRowStream.self)
+                let receipt = channel.eventLoop.makePromise(of: Void.self)
+                let completed = ManagedAtomic(false)
+                cached.futureResult.whenComplete { _ in completed.store(true, ordering: .relaxed) }
+                channel.write(task(cached), promise: receipt)
+                try await receipt.futureResult.get()
+                let resultIsPending = !completed.load(ordering: .relaxed)
+                #expect(resultIsPending)
+                _ = try await channel.waitForPreparedRequest()
+                try await channel.sendPreparedResponse(dataRows: [], commandTag: "SELECT 0")
+                let stream = try await cached.futureResult.get()
+                let rows = try await stream.all().get()
+                #expect(rows.isEmpty)
+            } catch {
+                Issue.record("Cached execution acceptance did not preserve its separate result")
+            }
+        }
+    }
+
     @Test func testConnectionFailure() {
         // We start a local server and close it immediately to ensure that the port
         // number we try to connect to is not used by any other process.
