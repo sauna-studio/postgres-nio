@@ -33,7 +33,7 @@ final class FutureWriteFailureTests: XCTestCase {
             for try await row in rows { terminated = try row.decode(Bool.self) }
             XCTAssertTrue(terminated)
             try await connection.closeFuture.get()
-            let started = ContinuousClock.now
+            let started = NIODeadline.now()
             do {
                 let future = connection.query(query, logger: self.logger) { _ in
                     XCTFail("Terminated transaction delivered a row")
@@ -45,7 +45,7 @@ final class FutureWriteFailureTests: XCTestCase {
             } catch {
                 XCTFail("Expected a PostgreSQL closed connection error")
             }
-            XCTAssertLessThan(started.duration(to: .now), .seconds(2))
+            XCTAssertLessThan(NIODeadline.now() - started, .seconds(2))
             try await control.close()
         } catch {
             try? await connection.close()
