@@ -195,7 +195,9 @@ extension PostgresConnection {
                 triggerCopy: continuation,
                 logger: logger
             )
-            self.channel.write(HandlerTask.extendedQuery(context), promise: nil)
+            self.writeTask(HandlerTask.extendedQuery(context)) { error in
+                continuation.resume(throwing: error)
+            }
         }
 
         do {

@@ -252,19 +252,17 @@ final class PostgresChannelHandler: ChannelDuplexHandler {
     
     func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
         let handlerTask = self.unwrapOutboundIn(data)
+        // The operation context, not this acceptance receipt, owns its result.
+        promise?.succeed(())
         let psqlTask: PSQLTask
 
         switch handlerTask {
         case .closeCommand(let command):
             psqlTask = .closeCommand(command)
         case .extendedQuery(let query):
-            // A write promise acknowledges acceptance of the task, not query
-            // completion (which has its own promise in the query context).
-            promise?.succeed(())
             psqlTask = .extendedQuery(query)
 
         case .startListening(let listener):
-            defer { promise?.succeed(()) }
             switch self.listenState.startListening(listener) {
             case .startListening(let channel):
                 psqlTask = self.makeStartListeningQuery(channel: channel, context: context)
