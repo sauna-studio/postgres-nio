@@ -244,6 +244,20 @@ public final class PostgresConnection: @unchecked Sendable {
 
     // MARK: Query
 
+    func writeTask<Value>(_ task: HandlerTask, failing promise: EventLoopPromise<Value>) {
+        self.writeTask(task) { error in promise.fail(error) }
+    }
+
+    func writeTask(_ task: HandlerTask, onFailure: @escaping @Sendable (PSQLError) -> Void) {
+        // Reusing the result promise would complete the operation on acceptance,
+        // before the server has produced its result. See sauna-api#48.
+        let writePromise = self.channel.eventLoop.makePromise(of: Void.self)
+        writePromise.futureResult.whenFailure { error in
+            onFailure(PSQLError.clientClosedConnection(underlying: error))
+        }
+        self.channel.write(task, promise: writePromise)
+    }
+
     private func queryStream(_ query: PostgresQuery, logger: Logger) -> EventLoopFuture<PSQLRowStream> {
         var logger = logger
         logger[postgresMetadataKey: .connectionID] = "\(self.id)"
@@ -258,7 +272,7 @@ public final class PostgresConnection: @unchecked Sendable {
             promise: promise
         )
 
-        self.channel.write(HandlerTask.extendedQuery(context), promise: nil)
+        self.writeTask(HandlerTask.extendedQuery(context), failing: promise)
 
         return promise.futureResult
     }
@@ -275,7 +289,7 @@ public final class PostgresConnection: @unchecked Sendable {
             promise: promise
         )
 
-        self.channel.write(HandlerTask.extendedQuery(context), promise: nil)
+        self.writeTask(HandlerTask.extendedQuery(context), failing: promise)
         return promise.futureResult.map { rowDescription in
             PSQLPreparedStatement(name: name, query: query, connection: self, rowDescription: rowDescription)
         }
@@ -291,7 +305,7 @@ public final class PostgresConnection: @unchecked Sendable {
             logger: logger,
             promise: promise)
 
-        self.channel.write(HandlerTask.extendedQuery(context), promise: nil)
+        self.writeTask(HandlerTask.extendedQuery(context), failing: promise)
         return promise.futureResult
     }
 
@@ -299,7 +313,7 @@ public final class PostgresConnection: @unchecked Sendable {
         let promise = self.channel.eventLoop.makePromise(of: Void.self)
         let context = CloseCommandContext(target: target, logger: logger, promise: promise)
 
-        self.channel.write(HandlerTask.closeCommand(context), promise: nil)
+        self.writeTask(HandlerTask.closeCommand(context), failing: promise)
         return promise.futureResult
     }
 
@@ -468,11 +482,7 @@ extension PostgresConnection {
             promise: promise
         )
 
-        let writePromise = self.channel.eventLoop.makePromise(of: Void.self)
-        writePromise.futureResult.whenFailure { error in
-            promise.fail(PSQLError.clientClosedConnection(underlying: error))
-        }
-        self.channel.write(HandlerTask.extendedQuery(context), promise: writePromise)
+        self.writeTask(HandlerTask.extendedQuery(context), failing: promise)
 
         do {
             return try await promise.futureResult.map({ $0.asyncSequence() }).get()
@@ -558,7 +568,7 @@ extension PostgresConnection {
             logger: logger,
             promise: promise
         ))
-        self.channel.write(task, promise: nil)
+        self.writeTask(task, failing: promise)
         do {
             return try await promise.futureResult
                 .map { $0.asyncSequence() }
@@ -593,7 +603,7 @@ extension PostgresConnection {
             logger: logger,
             promise: promise
         ))
-        self.channel.write(task, promise: nil)
+        self.writeTask(task, failing: promise)
         do {
             return try await promise.futureResult
                 .map { $0.commandTag }
@@ -844,7 +854,7 @@ extension PostgresConnection {
         )
 
         let task = HandlerTask.startListening(listener)
-        self.channel.write(task, promise: nil)
+        self.writeTask(task) { _ in listener.failed(PSQLError(code: .listenFailed)) }
 
         listenContext.future.whenComplete { _ in
             let task = HandlerTask.cancelListening(channel, id)
