@@ -13,4 +13,3 @@ Issues無効のforkでは、設定を変更せず利用側リポジトリのIssu
 導入PRでは追跡Issueを自動closeする記法を使わず参照する。恒久対応または回避策が不要になったことを、解消条件と回帰検証で確認してから追跡Issueを閉じる。
 
 ワークアラウンド追跡規則の適用元: `sauna-studio/.github@3a0c901bf9f921d5a1af760479e0be2debd3a4d9`。
-
